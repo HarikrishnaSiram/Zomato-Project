@@ -1,0 +1,79 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'mysonar'
+    }
+    stages {
+        stage("Clean WS...") {
+            steps {
+                cleanWs()
+            }
+        }
+        stage("Code...") {
+            steps {
+                git "https://github.com/HarikrishnaSiram/Zomato-Project.git"
+            }
+        }
+        stage("CQA...") {
+            steps {
+                withSonarQubeEnv('mysonar') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner \
+                    -Dsonar.projectName=zomato \
+                    -Dsonar.projectKey=zomato '''
+                }
+            }
+        }
+        stage("Quality Gates...") {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: "mysonar"
+                }
+            }
+        }
+        stage("Installing Dependencies...") {
+            steps {
+                sh "npm install"
+            }
+        }
+        stage("DP-Check") {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage("Trivy") {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+        stage("Image Build...") {
+            steps {
+                sh "docker build -t  myimage1 ."
+                sh "docker tag myimage1 harikrishna7/repo1:myimage2"
+            }
+        }
+        stage("Push to DockerHub...") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        sh "docker push harikrishna7/repo1:myimage2"
+                    }
+                }
+            }
+        }
+        stage ("Scanning Image...") {
+            steps {
+                sh "trivy image harikrishna7/repo1:myimage2"
+            }
+        }
+        stage ("Deploying...") {
+            steps {
+                sh "docker run -d --name cont1 -p 3000:3000 harikrishna7/repo1:myimage2"
+            }
+        }
+    }
+}
